@@ -1,4 +1,4 @@
-# GitHub Actions: Automated Docker Image Build and Deployment
+# GitHub Actions: Automated Docker Image Build and Artifactory push
 
 This repository contains a GitHub Actions pipeline that automates the process of building and deploying Docker images for various types of projects. It supports multiple languages, multi-stage builds, and integration with different container registries (Artifactory/DockerHub).
 
