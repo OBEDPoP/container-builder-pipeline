@@ -1,0 +1,80 @@
+name: Build and Deploy Docker Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'Git Repository URL'
+        required: true
+      branch:
+        description: 'Branch Name'
+        required: false
+        default: 'main'
+      github_username:
+        description: 'GitHub Username (required for private repositories)'
+        required: false
+      github_token:
+        description: 'GitHub Token (required for private repositories)'
+        required: false
+      registry_url:
+        description: 'Registry URL (Artifactory/DockerHub)'
+        required: false
+      registry_username:
+        description: 'Registry Username'
+        required: false
+      registry_password:
+        description: 'Registry Password'
+        required: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Set up repository URL and branch
+      id: repo-params
+      run: |
+        echo "::set-output name=repo_url::${{ github.event.inputs.repo_url }}"
+        echo "::set-output name=branch::${{ github.event.inputs.branch }}"
+
+    - name: Checkout repository
+      if: ${{ github.event.inputs.github_username && github.event.inputs.github_token }}
+      run: |
+        git clone -b ${{ steps.repo-params.outputs.branch }} https://${{ github.event.inputs.github_username }}:${{ github.event.inputs.github_token }}@${{ steps.repo-params.outputs.repo_url }} repo
+        cd repo
+      else:
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ github.event.inputs.repo_url }}
+          ref: ${{ steps.repo-params.outputs.branch }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Install jq and yq
+      run: sudo apt-get install -y jq && sudo pip install yq
+
+    - name: Generate Dockerfile and configurations
+      run: ./generate_dockerfile.sh
+
+    - name: Log in to Container Registry
+      if: ${{ github.event.inputs.registry_url && github.event.inputs.registry_username && github.event.inputs.registry_password }}
+      env:
+        REGISTRY_USERNAME: ${{ github.event.inputs.registry_username }}
+        REGISTRY_PASSWORD: ${{ github.event.inputs.registry_password }}
+      run: echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login ${{ github.event.inputs.registry_url }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+
+    - name: Build Docker image
+      run: docker build . -t ${{ github.event.inputs.registry_url }}/${{ steps.parse-manifest.outputs.appname }}:${{ steps.parse-manifest.outputs.tag }}
+
+    - name: Push Docker image
+      if: ${{ github.event.inputs.registry_url && github.event.inputs.registry_username && github.event.inputs.registry_password }}
+      run: docker push ${{ github.event.inputs.registry_url }}/${{ steps.parse-manifest.outputs.appname }}:${{ steps.parse-manifest.outputs.tag }}
+
+    - name: Save Docker image as artifact
+      if: ${{ github.event.inputs.registry_url == '' }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: docker-image
+        path: |
+          $(docker save ${{ github.event.inputs.registry_url }}/${{ steps.parse-manifest.outputs.appname }}:${{ steps.parse-manifest.outputs.tag }} -o docker_image.tar.gz)
